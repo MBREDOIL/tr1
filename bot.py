@@ -1,19 +1,18 @@
 import logging
 from pyrogram import Client, filters
+from pyrogram.handlers import MessageHandler
 import requests
-from bs4 import BeautifulSoup
 import hashlib
 import json
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # सेटअप लॉगिंग
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(name)
 
-# यूजर डेटा स्टोरेज (सरल JSON फ़ाइल-आधारित)
 USER_DATA_FILE = 'user_data.json'
 
 def load_user_data():
@@ -27,7 +26,6 @@ def save_user_data(user_data):
     with open(USER_DATA_FILE, 'w') as f:
         json.dump(user_data, f)
 
-# वेबपेज कंटेंट फेच करने की फंक्शन
 def fetch_url_content(url):
     try:
         response = requests.get(url, timeout=10)
@@ -37,7 +35,6 @@ def fetch_url_content(url):
         logger.error(f"Error fetching {url}: {e}")
         return None
 
-# वेबपेज चेंज डिटेक्शन फंक्शन
 def check_website_changes(url, previous_hash):
     current_content = fetch_url_content(url)
     if current_content:
@@ -45,7 +42,6 @@ def check_website_changes(url, previous_hash):
         return current_hash != previous_hash, current_hash
     return False, previous_hash
 
-# शेड्यूल्ड जॉब
 def check_urls(client):
     user_data = load_user_data()
     for user_id, data in user_data.items():
@@ -60,7 +56,6 @@ def check_urls(client):
                 url_info['hash'] = new_hash
     save_user_data(user_data)
 
-# टेलीग्राम बॉट कमांड हैंडलर्स
 async def start(client, message):
     await message.reply_text(
         'वेबसाइट ट्रैकिंग बॉट में आपका स्वागत है!\n\n'
@@ -73,26 +68,24 @@ async def start(client, message):
 async def track(client, message):
     user_id = str(message.from_user.id)
     url = ' '.join(message.command[1:]).strip()
-    
+
     if not url.startswith(('http://', 'https://')):
         await message.reply_text("⚠ कृपया वैध URL डालें (http/https के साथ)")
         return
-    
+
     user_data = load_user_data()
     if user_id not in user_data:
         user_data[user_id] = {'tracked_urls': []}
-    
-    # डुप्लिकेट चेक
+
     if any(u['url'] == url for u in user_data[user_id]['tracked_urls']):
         await message.reply_text("❌ यह URL पहले से ट्रैक किया जा रहा है")
         return
-    
-    # प्रारंभिक हैश प्राप्त करें
+
     content = fetch_url_content(url)
     if not content:
         await message.reply_text("❌ URL एक्सेस नहीं किया जा सका")
         return
-    
+
     new_hash = hashlib.sha256(content.encode()).hexdigest()
     user_data[user_id]['tracked_urls'].append({
         'url': url,
@@ -104,19 +97,18 @@ async def track(client, message):
 async def untrack(client, message):
     user_id = str(message.from_user.id)
     url = ' '.join(message.command[1:]).strip()
-    
+
     user_data = load_user_data()
     if user_id not in user_data:
         await message.reply_text("❌ कोई ट्रैक किए गए URL नहीं मिले")
         return
-    
-    # URL हटाएं
+
     original_count = len(user_data[user_id]['tracked_urls'])
     user_data[user_id]['tracked_urls'] = [
-        u for u in user_data[user_id]['tracked_urls'] 
+        u for u in user_data[user_id]['tracked_urls']
         if u['url'] != url
     ]
-    
+
     if len(user_data[user_id]['tracked_urls']) < original_count:
         save_user_data(user_data)
         await message.reply_text(f"❎ ट्रैकिंग बंद: {url}")
@@ -126,30 +118,30 @@ async def untrack(client, message):
 async def list_urls(client, message):
     user_id = str(message.from_user.id)
     user_data = load_user_data()
-    
+
     if user_id not in user_data or not user_data[user_id]['tracked_urls']:
         await message.reply_text("📭 आपने अभी कोई URL ट्रैक नहीं किया है")
         return
-    
+
     urls = "\n".join([u['url'] for u in user_data[user_id]['tracked_urls']])
     await message.reply_text(f"📜 ट्रैक किए गए URLs:\n\n{urls}")
 
 def main():
     app = Client("my_bot", api_id="YOUR_API_ID", api_hash="YOUR_API_HASH", bot_token="YOUR_BOT_TOKEN")
-    
-    # कमांड हैंडलर्स रजिस्टर करें
-    app.add_handler(filters.command("start"), start)
-    app.add_handler(filters.command("track"), track)
-    app.add_handler(filters.command("untrack"), untrack)
-    app.add_handler(filters.command("list"), list_urls)
-    
-    # शेड्यूलर सेटअप (हर 5 मिनट में चेक)
+
+    app.add_handler(MessageHandler(start, filters.command("start")))
+    app.add_handler(MessageHandler(track, filters.command("track")))
+    app.add_handler(MessageHandler(untrack, filters.command("untrack")))
+    app.add_handler(MessageHandler(list_urls, filters.command("list")))
+
     scheduler = BackgroundScheduler()
     scheduler.add_job(check_urls, 'interval', minutes=5, args=[app])
     scheduler.start()
-    
-    # बॉट स्टार्ट करें
-    app.run()
 
-if __name__ == '__main__':
+    try:
+        app.run()
+    except Exception as e:
+        logger.error(f"Error running the bot: {e}")
+
+if name == 'main':
     main()
