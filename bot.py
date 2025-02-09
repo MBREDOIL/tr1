@@ -1,12 +1,10 @@
 import logging
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
+from pyrogram import Client, filters
 import requests
 from bs4 import BeautifulSoup
 import hashlib
 import json
 from apscheduler.schedulers.background import BackgroundScheduler
-import time
 
 # सेटअप लॉगिंग
 logging.basicConfig(
@@ -48,14 +46,14 @@ def check_website_changes(url, previous_hash):
     return False, previous_hash
 
 # शेड्यूल्ड जॉब
-def check_urls(context: CallbackContext):
+def check_urls(client):
     user_data = load_user_data()
     for user_id, data in user_data.items():
         for url_info in data['tracked_urls']:
             url = url_info['url']
             changed, new_hash = check_website_changes(url, url_info['hash'])
             if changed:
-                context.bot.send_message(
+                client.send_message(
                     chat_id=user_id,
                     text=f"🚨 वेबसाइट में बदलाव आया है! {url}"
                 )
@@ -63,8 +61,8 @@ def check_urls(context: CallbackContext):
     save_user_data(user_data)
 
 # टेलीग्राम बॉट कमांड हैंडलर्स
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
+async def start(client, message):
+    await message.reply_text(
         'वेबसाइट ट्रैकिंग बॉट में आपका स्वागत है!\n\n'
         'कमांड्स:\n'
         '/track <url> - वेबसाइट ट्रैक करें\n'
@@ -72,12 +70,12 @@ def start(update: Update, context: CallbackContext):
         '/list - ट्रैक की गई वेबसाइट्स देखें'
     )
 
-def track(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    url = ' '.join(context.args).strip()
+async def track(client, message):
+    user_id = str(message.from_user.id)
+    url = ' '.join(message.command[1:]).strip()
     
     if not url.startswith(('http://', 'https://')):
-        update.message.reply_text("⚠ कृपया वैध URL डालें (http/https के साथ)")
+        await message.reply_text("⚠ कृपया वैध URL डालें (http/https के साथ)")
         return
     
     user_data = load_user_data()
@@ -86,13 +84,13 @@ def track(update: Update, context: CallbackContext):
     
     # डुप्लिकेट चेक
     if any(u['url'] == url for u in user_data[user_id]['tracked_urls']):
-        update.message.reply_text("❌ यह URL पहले से ट्रैक किया जा रहा है")
+        await message.reply_text("❌ यह URL पहले से ट्रैक किया जा रहा है")
         return
     
     # प्रारंभिक हैश प्राप्त करें
     content = fetch_url_content(url)
     if not content:
-        update.message.reply_text("❌ URL एक्सेस नहीं किया जा सका")
+        await message.reply_text("❌ URL एक्सेस नहीं किया जा सका")
         return
     
     new_hash = hashlib.sha256(content.encode()).hexdigest()
@@ -101,15 +99,15 @@ def track(update: Update, context: CallbackContext):
         'hash': new_hash
     })
     save_user_data(user_data)
-    update.message.reply_text(f"✅ ट्रैकिंग शुरू: {url}")
+    await message.reply_text(f"✅ ट्रैकिंग शुरू: {url}")
 
-def untrack(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    url = ' '.join(context.args).strip()
+async def untrack(client, message):
+    user_id = str(message.from_user.id)
+    url = ' '.join(message.command[1:]).strip()
     
     user_data = load_user_data()
     if user_id not in user_data:
-        update.message.reply_text("❌ कोई ट्रैक किए गए URL नहीं मिले")
+        await message.reply_text("❌ कोई ट्रैक किए गए URL नहीं मिले")
         return
     
     # URL हटाएं
@@ -121,40 +119,37 @@ def untrack(update: Update, context: CallbackContext):
     
     if len(user_data[user_id]['tracked_urls']) < original_count:
         save_user_data(user_data)
-        update.message.reply_text(f"❎ ट्रैकिंग बंद: {url}")
+        await message.reply_text(f"❎ ट्रैकिंग बंद: {url}")
     else:
-        update.message.reply_text("❌ URL नहीं मिला")
+        await message.reply_text("❌ URL नहीं मिला")
 
-def list_urls(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
+async def list_urls(client, message):
+    user_id = str(message.from_user.id)
     user_data = load_user_data()
     
     if user_id not in user_data or not user_data[user_id]['tracked_urls']:
-        update.message.reply_text("📭 आपने अभी कोई URL ट्रैक नहीं किया है")
+        await message.reply_text("📭 आपने अभी कोई URL ट्रैक नहीं किया है")
         return
     
     urls = "\n".join([u['url'] for u in user_data[user_id]['tracked_urls']])
-    update.message.reply_text(f"📜 ट्रैक किए गए URLs:\n\n{urls}")
+    await message.reply_text(f"📜 ट्रैक किए गए URLs:\n\n{urls}")
 
 def main():
-    # बॉट टोकन के साथ अपडेटर इनिशियलाइज़ करें
-    updater = Updater(token="YOUR_TELEGRAM_BOT_TOKEN", use_context=True)
+    app = Client("my_bot", api_id="YOUR_API_ID", api_hash="YOUR_API_HASH", bot_token="YOUR_BOT_TOKEN")
     
     # कमांड हैंडलर्स रजिस्टर करें
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("track", track))
-    dp.add_handler(CommandHandler("untrack", untrack))
-    dp.add_handler(CommandHandler("list", list_urls))
+    app.add_handler(filters.command("start"), start)
+    app.add_handler(filters.command("track"), track)
+    app.add_handler(filters.command("untrack"), untrack)
+    app.add_handler(filters.command("list"), list_urls)
     
     # शेड्यूलर सेटअप (हर 5 मिनट में चेक)
     scheduler = BackgroundScheduler()
-    scheduler.add_job(check_urls, 'interval', minutes=5, args=[updater])
+    scheduler.add_job(check_urls, 'interval', minutes=5, args=[app])
     scheduler.start()
     
     # बॉट स्टार्ट करें
-    updater.start_polling()
-    updater.idle()
+    app.run()
 
 if __name__ == '__main__':
     main()
