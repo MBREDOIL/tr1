@@ -11,7 +11,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(name)
+logger = logging.getLogger(__name__)
 
 USER_DATA_FILE = 'user_data.json'
 
@@ -143,5 +143,5 @@ def main():
     except Exception as e:
         logger.error(f"Error running the bot: {e}")
 
-if name == 'main':
+if __name__ == '__main__':
     main()
